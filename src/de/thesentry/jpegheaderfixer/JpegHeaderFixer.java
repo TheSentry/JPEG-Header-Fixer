@@ -17,13 +17,13 @@
  */
 package de.thesentry.jpegheaderfixer;
 
-import java.io.BufferedReader;
-import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileNotFoundException;
-import java.io.FileReader;
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 
 /**
  * @author Florian Mittag
@@ -39,6 +39,11 @@ public class JpegHeaderFixer {
 
 	public static final String VERSION_STRING = "0.1.0";
 
+	
+	public static final byte[] BYTES_START_OF_IMAGE = new byte[]{(byte)0xFF, (byte)0xD8};
+	public static final byte[] BYTES_END_OF_IMAGE = new byte[]{(byte)0xFF, (byte)0xD9};
+	public static final byte[] BYTES_APP1_MARKER = new byte[]{(byte)0xFF, (byte)0xE1};
+	public static final byte[] BYTES_DEFINE_QUANTIZATION_TABLE = new byte[]{(byte)0xFF, (byte)0xDB};
 	
 	/**
 	 * @param args
@@ -107,24 +112,91 @@ public class JpegHeaderFixer {
 			printErrorAndExit("Input file '" + inFile.toString() + "' can't be read");
 		}
 		
-		// Check output file for writability
-		if( outFile.exists() ) {
-			printErrorAndExit("Output file '" + outFile.toString() + "' already exists");
-		} else if( !outFile.canWrite() ) {
-			printErrorAndExit("Output file '" + outFile.toString() + "' is not writable");
-		}
 		
 		// Open input file in read-only mode
 		RandomAccessFile raf = new RandomAccessFile(inFile, "r");
 		
-		// Check for JPEG header
-		byte[] twobytes = new byte[2];
-		int bytesRead = raf.read(twobytes);
-		if( bytesRead != 2 ) {
-			
+		/* Check for JPEG header
+		 * 
+		 * FF D8 FF E1  xx xx 45 78  69 66 00 00  yy yy yy yy
+		 * 
+		 * FF D8    Start of Image (SOI) marker
+		 * FF E1    APP1 Marker
+		 * xx xx    APP1 length (this is the problem we're going to fix)
+		 * 45 78    "Ex"
+		 * 69 66    "if" => Exif
+		 * 00 00
+		 * yy yy    APP1 body
+		 */
+
+		int app1length;
+		
+		assertBytes(raf, BYTES_START_OF_IMAGE, "No JPEG header (SOI Marker)");
+		assertBytes(raf, BYTES_APP1_MARKER, "No APP1 Marker");
+		app1length = raf.readUnsignedShort();
+		assertBytes(raf, new byte[]{(byte)0x45, (byte)0x78, (byte)0x69, (byte)0x66}, "No Exif marker");
+		assertBytes(raf, new byte[]{(byte)0x00, (byte)0x00}, "No 00 00 padding");
+		System.out.println(raf.getFilePointer());
+		
+		System.out.println("Header structure seems fine");
+		System.out.println("APP1 segment length according to header: " + app1length);
+		
+		
+		/*
+		 * Now check for the end of the APP1 segment and other SOI markers
+		 */
+		
+		
+		byte[] twoBytes = new byte[2];
+		while( raf.read(twoBytes) >= 0 ) {
+			if( Arrays.equals(twoBytes, BYTES_END_OF_IMAGE)) {
+				System.out.println("End of image (EOI) marker found at " + (raf.getFilePointer() - 2) );
+			} else if( Arrays.equals(twoBytes, BYTES_START_OF_IMAGE)) {
+				System.out.println("Start of image (EOI) marker found at " + (raf.getFilePointer() - 2) );
+			} else if( Arrays.equals(twoBytes, BYTES_DEFINE_QUANTIZATION_TABLE)) {
+				System.out.println("Define Quantization Table (DQT) marker found at " + (raf.getFilePointer() - 2) );
+			}
 		}
 		
+		
+		// Check output file for writability
+		if( outFile.exists() ) {
+			printErrorAndExit("Output file '" + outFile.toString() + "' already exists");
+		} else if( !dryRun ) {
+			if( !outFile.createNewFile() ) {
+				printErrorAndExit("Output file '" + outFile.toString() + "' is not writable");
+			}
+		}
+
 	}
+	
+	
+	/**
+	 * Reads the next {@code expected.length} bytes from the {@code RandomAccessFile}
+	 * and compares then to the expected values. If now equal, print the message
+	 * and exit.
+	 * 
+	 * @param raf
+	 * @param expected
+	 * @param msg
+	 * @return
+	 * @throws IOException 
+	 */
+	public static boolean assertBytes(RandomAccessFile raf, byte[] expected, String msg) throws IOException {
+		byte[] b = new byte[expected.length];
+		int bytesRead = raf.read(b);
+		
+		if( bytesRead == expected.length && Arrays.equals(expected, b) ) {
+			return true;
+		}
+
+		System.out.println(msg);
+		System.out.println("This tool cannot handle the problem with this JPEG file");
+		System.exit(2);
+		return false;
+	}
+	
+	
 	
 	/*
 	 * Copyright-related methods
@@ -154,7 +226,13 @@ public class JpegHeaderFixer {
 		+ "You should have received a copy of the GNU General Public License\n"
 		);		
 	}
+
 	
+	/*
+	 * Usage and help output methods
+	 * 
+	 ***************************************************************************/
+
 	public static void printUsageString() {
 		printCopyrightHeader();
 		System.out.println("Usage: java -jar " + PROGRAM_NAME + " [-n] <corrupted JPEG-file> [<target JPEG-file>]");
