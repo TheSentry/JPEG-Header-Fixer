@@ -21,9 +21,7 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.RandomAccessFile;
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.List;
 
 /**
  * @author Florian Mittag
@@ -152,7 +150,7 @@ public class JpegHeaderFixer {
 			if( Arrays.equals(twoBytes, BYTES_END_OF_IMAGE)) {
 				System.out.println("End of image (EOI) marker found at " + (raf.getFilePointer() - 2) );
 			} else if( Arrays.equals(twoBytes, BYTES_START_OF_IMAGE)) {
-				System.out.println("Start of image (EOI) marker found at " + (raf.getFilePointer() - 2) );
+				System.out.println("Start of image (SOI) marker found at " + (raf.getFilePointer() - 2) );
 			} else if( Arrays.equals(twoBytes, BYTES_DEFINE_QUANTIZATION_TABLE)) {
 				System.out.println("Define Quantization Table (DQT) marker found at " + (raf.getFilePointer() - 2) );
 			}
