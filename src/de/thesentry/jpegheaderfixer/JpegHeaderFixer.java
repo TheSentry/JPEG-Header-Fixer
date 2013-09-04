@@ -38,10 +38,31 @@ public class JpegHeaderFixer {
 	public static final String VERSION_STRING = "0.1.0";
 
 	
-	public static final byte[] BYTES_START_OF_IMAGE = new byte[]{(byte)0xFF, (byte)0xD8};
-	public static final byte[] BYTES_END_OF_IMAGE = new byte[]{(byte)0xFF, (byte)0xD9};
-	public static final byte[] BYTES_APP1_MARKER = new byte[]{(byte)0xFF, (byte)0xE1};
-	public static final byte[] BYTES_DEFINE_QUANTIZATION_TABLE = new byte[]{(byte)0xFF, (byte)0xDB};
+	public static final byte[] BYTES_START_OF_IMAGE =                 new byte[]{(byte)0xFF, (byte)0xD8};
+	public static final byte[] BYTES_END_OF_IMAGE =                   new byte[]{(byte)0xFF, (byte)0xD9};
+	public static final byte[] BYTES_DEFINE_QUANTIZATION_TABLE =      new byte[]{(byte)0xFF, (byte)0xDB};
+	public static final byte[] BYTES_JFIF_MARKER =                    new byte[]{(byte)0xFF, (byte)0xE0};
+	public static final byte[] BYTES_APP1_MARKER =                    new byte[]{(byte)0xFF, (byte)0xE1};
+	
+	
+	public static String getNameForMarker(byte[] marker) {
+	  String name;
+	  if( Arrays.equals(marker, BYTES_START_OF_IMAGE) ) {
+	    name = "Start of Image (SOI)";
+	  } else if( Arrays.equals(marker, BYTES_END_OF_IMAGE) ) {
+	    name = "End of Image (EOI)";
+    } else if( Arrays.equals(marker, BYTES_DEFINE_QUANTIZATION_TABLE) ) {
+      name = "Define Quantization Table (DQT)";
+    } else if( Arrays.equals(marker, BYTES_JFIF_MARKER) ) {
+      name = "JFIF";
+    } else if( Arrays.equals(marker, BYTES_APP1_MARKER) ) {
+      name = "APP1";
+	  } else {
+	    name = null;
+	  }
+	  return name;
+	}
+	
 	
 	/**
 	 * @param args
@@ -113,6 +134,7 @@ public class JpegHeaderFixer {
 		
 		// Open input file in read-only mode
 		RandomAccessFile raf = new RandomAccessFile(inFile, "r");
+		System.out.println("Analyzing file: " + inFile.getAbsolutePath());
 		
 		/* Check for JPEG header
 		 * 
@@ -134,10 +156,11 @@ public class JpegHeaderFixer {
 		app1length = raf.readUnsignedShort();
 		assertBytes(raf, new byte[]{(byte)0x45, (byte)0x78, (byte)0x69, (byte)0x66}, "No Exif marker");
 		assertBytes(raf, new byte[]{(byte)0x00, (byte)0x00}, "No 00 00 padding");
-		System.out.println(raf.getFilePointer());
 		
 		System.out.println("Header structure seems fine");
 		System.out.println("APP1 segment length according to header: " + app1length);
+    System.out.println("Supposed start of image: " + (app1length + 4));
+    System.out.println("Supposed start of image if overflow occured: " + (app1length + 4 + 65536));
 		
 		
 		/*
@@ -145,14 +168,32 @@ public class JpegHeaderFixer {
 		 */
 		
 		
-		byte[] twoBytes = new byte[2];
-		while( raf.read(twoBytes) >= 0 ) {
-			if( Arrays.equals(twoBytes, BYTES_END_OF_IMAGE)) {
-				System.out.println("End of image (EOI) marker found at " + (raf.getFilePointer() - 2) );
-			} else if( Arrays.equals(twoBytes, BYTES_START_OF_IMAGE)) {
-				System.out.println("Start of image (SOI) marker found at " + (raf.getFilePointer() - 2) );
-			} else if( Arrays.equals(twoBytes, BYTES_DEFINE_QUANTIZATION_TABLE)) {
-				System.out.println("Define Quantization Table (DQT) marker found at " + (raf.getFilePointer() - 2) );
+		byte[] twoBytes = new byte[]{0,0};
+		int nextByte = -1;
+		// read bytes until we reach the end of the file
+		while( (nextByte = raf.read()) >= 0 ) {
+		  // shift array to contain the last two bytes
+		  twoBytes[0] = twoBytes[1];
+		  twoBytes[1] = (byte)nextByte;
+		  
+		  // store position (just for convenience)
+		  long pos = raf.getFilePointer() - 2;
+		  
+		  // if we reached the position denoted by the APP1 length, say so
+		  if( pos == app1length + 4 ) {
+		    System.out.println("Now right after supposed end of APP1 segment (" + pos + ")");
+		  }
+		  
+		  // if the last two bytes match any of the following markers, report position
+		  String markerName = getNameForMarker(twoBytes);
+		  if( markerName != null ) {
+		    System.out.println(markerName + " marker fount at " + pos );
+			} else {
+			  // if none of the above markers matched, but we are at the position where
+			  // the image should begin, print what was actually found
+	      if( pos == app1length + 4 ) {
+	        System.out.println("Two bytes found are: 0x" + toHex(twoBytes));
+	      }
 			}
 		}
 		
@@ -189,12 +230,21 @@ public class JpegHeaderFixer {
 		}
 
 		System.out.println(msg);
+		String markerName = getNameForMarker(b);
+		System.out.println("Found instead: " + toHex(b) + (markerName == null ? "" : " = " + markerName + " marker"));
 		System.out.println("This tool cannot handle the problem with this JPEG file");
 		System.exit(2);
 		return false;
 	}
 	
 	
+	public static String toHex(byte[] b) {
+	  StringBuilder sb = new StringBuilder(b.length);
+	  for( int i = 0; i < b.length; i++ ) {
+	    sb.append( String.format("%02X", b[i]));
+	  }
+	  return sb.toString();
+	}
 	
 	/*
 	 * Copyright-related methods
